@@ -8,4 +8,4 @@ aiohttp
 python-dotenv
 ddgs
 psutil
-ffmpeg
+imageio-ffmpeg
