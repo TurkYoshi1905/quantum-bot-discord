@@ -1,11 +1,10 @@
-py-cord[voice]>=2.4.0
+discord.py[voice]>=2.4.0
 PyNaCl
-pytubefix
+yt-dlp
 groq
 openai
 edge-tts
 aiohttp
 python-dotenv
-ddgs
+duckduckgo-search
 psutil
-imageio-ffmpeg
