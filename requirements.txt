@@ -1,0 +1,10 @@
+py-cord[voice]>=2.4.0
+PyNaCl
+pytubefix
+groq
+openai
+edge-tts
+aiohttp
+python-dotenv
+ddgs
+psutil
