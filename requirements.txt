@@ -8,3 +8,4 @@ aiohttp
 python-dotenv
 duckduckgo-search
 psutil
+ffmpeg
