@@ -524,6 +524,9 @@ async def on_message(message: discord.Message):
 # ----------------- KOMUTLAR (SES VE MÜZİK) -----------------
 @bot.tree.command(name="muzikoynat", description="Sesli kanalda müzik çalmaya başlar (yt-dlp).")
 async def muzikoynat(interaction: discord.Interaction, sarki: str):
+    if interaction.user.name != "turkyoshi8092":
+        return await interaction.response.send_message("Hey! Bu Komut Siz Düzgün Kullanmadığınız İçin Çalıştıramazsınız Ve Sürekli Ya Spam Veya Güvenlik Açıklarından Dolayı Bir Süre Kapalı Olacak. Lütfen Başka Komutları Deneyiniz.", ephemeral=True)
+
     if not interaction.user.voice:
         return await interaction.response.send_message("Önce bir sesli kanala katılmalısın.", ephemeral=True)
 
@@ -546,6 +549,9 @@ async def muzikoynat(interaction: discord.Interaction, sarki: str):
 
 @bot.tree.command(name="muzikdurdur", description="Çalan müziği ve sesi durdurur.")
 async def muzikdurdur(interaction: discord.Interaction):
+    if interaction.user.name != "turkyoshi8092":
+        return await interaction.response.send_message("Hey! Bu Komut Siz Düzgün Kullanmadığınız İçin Çalıştıramazsınız Ve Sürekli Ya Spam Veya Güvenlik Açıklarından Dolayı Bir Süre Kapalı Olacak. Lütfen Başka Komutları Deneyiniz.", ephemeral=True)
+
     voice_client: discord.VoiceClient = interaction.guild.voice_client
     if not voice_client or not voice_client.is_playing():
         return await interaction.response.send_message("Şu an çalan bir şey yok.", ephemeral=True)
@@ -674,6 +680,9 @@ async def konustur_komutu(interaction: discord.Interaction, metin: str):
 
 @bot.tree.command(name="quantumkatil", description="Sesli kanala katılır.")
 async def quantumkatil(interaction: discord.Interaction):
+    if interaction.user.name != "turkyoshi8092":
+        return await interaction.response.send_message("Hey! Bu Komut Siz Düzgün Kullanmadığınız İçin Çalıştıramazsınız Ve Sürekli Ya Spam Veya Güvenlik Açıklarından Dolayı Bir Süre Kapalı Olacak. Lütfen Başka Komutları Deneyiniz.", ephemeral=True)
+
     if not interaction.user.voice: return await interaction.response.send_message("Önce bir sesli kanala katılmalısın.", ephemeral=True)
 
     channel = interaction.user.voice.channel
@@ -681,15 +690,18 @@ async def quantumkatil(interaction: discord.Interaction):
     if not voice_client:
         voice_client = await channel.connect()
 
-    await interaction.response.send_message(f"{channel.name} kanalına katıldım.")
+    await interaction.response.send_message(f"{channel.name} kanalına katıldım. Selamın Aleyküm! Sesli Sohbete Katıldım, Size Nasıl Yardımcı Olabilirim?")
     
     audio_file = "katildi.mp3"
-    await generate_tts("Sohbete katıldım.", audio_file)
+    await generate_tts("Selamın Aleyküm! Sesli Sohbete Katıldım, Size Nasıl Yardımcı Olabilirim?", audio_file)
     if voice_client.is_playing(): voice_client.stop()
     voice_client.play(discord.FFmpegPCMAudio(audio_file))
 
 @bot.tree.command(name="quantumayril", description="Sesli kanaldan ayrılır.")
 async def quantumayril(interaction: discord.Interaction):
+    if interaction.user.name != "turkyoshi8092":
+        return await interaction.response.send_message("Hey! Bu Komut Siz Düzgün Kullanmadığınız İçin Çalıştıramazsınız Ve Sürekli Ya Spam Veya Güvenlik Açıklarından Dolayı Bir Süre Kapalı Olacak. Lütfen Başka Komutları Deneyiniz.", ephemeral=True)
+
     voice_client: discord.VoiceClient = interaction.guild.voice_client
     if voice_client:
         await voice_client.disconnect()
