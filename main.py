@@ -15,7 +15,7 @@ from openai import OpenAI
 import edge_tts
 import aiohttp
 import psutil
-import yt_dlp
+import pytubefix
 import ffmpeg
 from duckduckgo_search import DDGS
 from dotenv import load_dotenv
