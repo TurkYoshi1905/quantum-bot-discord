@@ -15,20 +15,13 @@ from openai import OpenAI
 import edge_tts
 import aiohttp
 import psutil
-from pytubefix import YouTube, Search
+import yt_dlp
 import ffmpeg
 from duckduckgo_search import DDGS
 from dotenv import load_dotenv
 
 sys.stdout.reconfigure(line_buffering=True)
 logging.getLogger('duckduckgo_search').setLevel(logging.WARNING)
-
-# BotHosting.net ve FFMPEG Hataları İçin Çözüm
-try:
-    import imageio_ffmpeg
-    FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
-except ImportError:
-    FFMPEG_EXE = "ffmpeg"
 
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
@@ -56,6 +49,60 @@ START_TIME = time.time()
 
 psutil.cpu_percent()
 
+# ----------------- YT-DLP VE FFMPEG AYARLARI -----------------
+ffmpeg_options = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn'
+}
+
+def get_ytdl_options():
+    opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+        'restrictfilenames': True,
+        'noplaylist': True,
+        'nocheckcertificate': True,
+        'ignoreerrors': False,
+        'logtostderr': False,
+        'quiet': True,
+        'no_warnings': True,
+        'default_search': 'ytsearch',
+        'source_address': '0.0.0.0',
+        # YouTube bot engeli aşıcı User-Agent ve İstemci ayarları:
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['mweb', 'android', 'ios']
+            }
+        }
+    }
+    # cookies.txt varsa otomatik tanı ve yükle
+    if os.path.exists('cookies.txt'):
+        opts['cookiefile'] = 'cookies.txt'
+    return opts
+
+class YTDLSource(discord.PCMVolumeTransformer):
+    def __init__(self, source, *, data, volume=0.5):
+        super().__init__(source, volume)
+        self.data = data
+        self.title = data.get('title')
+        self.url = data.get('url')
+
+    @classmethod
+    async def from_url(cls, url, *, loop=None, stream=True):
+        loop = loop or asyncio.get_event_loop()
+        ytdl = yt_dlp.YoutubeDL(get_ytdl_options())
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+
+        if 'entries' in data:
+            data = data['entries'][0]
+
+        filename = data['url'] if stream else ytdl.prepare_filename(data)
+        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
+
 # ----------------- DİNAMİK SİSTEM YÖNERGESİ -----------------
 def get_system_prompt() -> str:
     now = datetime.datetime.now()
@@ -73,6 +120,8 @@ def get_system_prompt() -> str:
         "5. MÜZİK KONTROLÜ: Kullanıcı müzik açmanı veya şarkı çalmanı isterse, cevabının sonuna tam olarak '[PLAY: ŞARKI ADI VEYA LİNK]' ekle. (Örn: Müziği açıyorum. [PLAY: Deltarune OST]).\n"
         "Eğer müziği kapatmanı/durdurmanı isterse cevabının sonuna '[STOP]' ekle. (Örn: Müziği kapattım. [STOP]).\n"
         "6. Sana geliştiricin veya seni kimin kodladığı sorulursa SADECE 'FurkanCodes' olarak cevap ver.\n"
+        "7. GÜVENLİK VE MODERASYON: Kullanıcılar senden küfür, argo, cinsel içerik, şiddet, hakaret içeren veya trolleme amaçlı (örneğin 'şunu de', 'şunu yaz' diyerek uygunsuz/absürt kelimeler kullandırmaya çalışma) şeyler isterse, ASLA bu kelimeleri tekrar etme! İsteği KESİNLİKLE reddet ve SADECE 'Lütfen daha uygun veya farklı bir soru sorun.' yaz.\n"
+        "8. DOĞRULUK: Asla yanlış veya uydurma bilgi verme. Bilmediğin veya emin olmadığın durumlarda dürüst ol ve 'Bu konuda net bir bilgim yok.' de.\n"
         f"SİSTEM BİLGİSİ: Şu anki güncel tarih ve saat: {tarih_str}."
     )
 
@@ -136,41 +185,12 @@ async def generate_tts(text: str, output_file: str):
 
 async def play_music_in_voice(voice_client: discord.VoiceClient, query: str):
     try:
-        loop = asyncio.get_event_loop()
-        def download_song():
-            if "youtube.com" not in query and "youtu.be" not in query:
-                s = Search(query)
-                if not s.videos:
-                    return None, None
-                yt = s.videos[0]
-            else:
-                yt = YouTube(query)
-            
-            audio_stream = yt.streams.get_audio_only()
-            if not os.path.exists("downloads"):
-                os.makedirs("downloads")
-                
-            file_path = audio_stream.download(output_path="downloads", mp3=True)
-            return file_path, yt.title
-
-        file_path, title = await loop.run_in_executor(None, download_song)
-        
-        if not file_path:
-            return None
-            
+        player = await YTDLSource.from_url(query, loop=bot.loop, stream=True)
         if voice_client.is_playing():
             voice_client.stop()
-            
-        ffmpeg_opts = {
-            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'options': '-vn'
-        }
-        
-        voice_client.play(discord.FFmpegPCMAudio(file_path, **ffmpeg_opts, executable=FFMPEG_EXE))
-        return title
+        voice_client.play(player)
     except Exception as e:
         print(f"[MÜZİK HATA] {e}")
-        return None
 
 # ----------------- BOT BİLGİ SİSTEMİ -----------------
 def get_uptime():
@@ -503,40 +523,9 @@ async def on_message(message: discord.Message):
         if not temiz: await message.channel.send(f"Merhaba {message.author.mention}, ben Quantum. Nasıl yardımcı olabilirim?")
     await bot.process_commands(message)
 
-# ----------------- OTTO ÖZEL KARŞILAMA (VOICE UPDATE) -----------------
-@bot.event
-async def on_voice_state_update(member, before, after):
-    # Eğer odaya yeni bağlanan kişi osmanliamca_770 ise ve bağlandığı bir kanal varsa
-    if member.name == "osmanliamca_770" and before.channel != after.channel and after.channel is not None:
-        voice_client = member.guild.voice_client
-        # Eğer bot halihazırda bu sunucuda sesli kanaldaysa ve Otto'nun girdiği kanal da botun kanalıysa
-        if voice_client and voice_client.channel == after.channel:
-            greetings = [
-                "Vay Vay Otto Gelmiş Hoşgelmiş, Nasılsın Dostum?",
-                "Ooo mekanın sahibi Otto teşrif ettiler, halı serin ulan!",
-                "Otto paşam gelmiş, destur deyin ulan!",
-                "Otto Borcunu Öde Lan İbiş",
-                "Otto sen bu sesli sohbete katılınca mikrofonum bile utancından kendini sessize alıyor kanka.",
-                "Adam geldi adam! Pardon yanlış oldu, Otto gelmiş.",
-                "Ooo Otto, geçen gün seni Google'da arattım, 'bunu mu demek istediniz: kralların kralı' yazmadı. Çünkü borcunu ödemeyen ibiş yazdı. Otto Borcunu Öde Lan İbiş!"
-            ]
-            secilen_soz = random.choice(greetings)
-            audio_file = "otto_karsilama.mp3"
-            
-            await generate_tts(secilen_soz, audio_file)
-            
-            # Eğer halihazırda bir şey çalıyorsa susturup esprisini yapar
-            if voice_client.is_playing():
-                voice_client.stop()
-            
-            voice_client.play(discord.FFmpegPCMAudio(audio_file, executable=FFMPEG_EXE))
-
 # ----------------- KOMUTLAR (SES VE MÜZİK) -----------------
-@bot.tree.command(name="muzikoynat", description="Sesli kanalda müzik çalmaya başlar (pytubefix).")
+@bot.tree.command(name="muzikoynat", description="Sesli kanalda müzik çalmaya başlar (yt-dlp).")
 async def muzikoynat(interaction: discord.Interaction, sarki: str):
-    if interaction.user.name != "turkyoshi8092":
-        return await interaction.response.send_message("Hey! Bu Komut Siz Düzgün Kullanmadığınız İçin Çalıştıramazsınız Ve Sürekli Ya Spam Veya Güvenlik Açıklarından Dolayı Bir Süre Kapalı Olacak. Lütfen Başka Komutları Deneyiniz.", ephemeral=True)
-
     if not interaction.user.voice:
         return await interaction.response.send_message("Önce bir sesli kanala katılmalısın.", ephemeral=True)
 
@@ -549,19 +538,16 @@ async def muzikoynat(interaction: discord.Interaction, sarki: str):
 
     await interaction.response.defer()
     try:
-        title = await play_music_in_voice(voice_client, sarki)
-        if title:
-            await interaction.followup.send(f"▶️ Oynatılıyor: **{title}**")
-        else:
-            await interaction.followup.send("❌ Şarkı bulunamadı veya indirilirken hata oluştu.")
+        player = await YTDLSource.from_url(sarki, loop=bot.loop, stream=True)
+        if voice_client.is_playing():
+            voice_client.stop()
+        voice_client.play(player)
+        await interaction.followup.send(f"▶️ Oynatılıyor: **{player.title}**")
     except Exception as e:
         await interaction.followup.send(f"❌ Müzik çalınırken bir hata oluştu: {str(e)}")
 
 @bot.tree.command(name="muzikdurdur", description="Çalan müziği ve sesi durdurur.")
 async def muzikdurdur(interaction: discord.Interaction):
-    if interaction.user.name != "turkyoshi8092":
-        return await interaction.response.send_message("Hey! Bu Komut Siz Düzgün Kullanmadığınız İçin Çalıştıramazsınız Ve Sürekli Ya Spam Veya Güvenlik Açıklarından Dolayı Bir Süre Kapalı Olacak. Lütfen Başka Komutları Deneyiniz.", ephemeral=True)
-
     voice_client: discord.VoiceClient = interaction.guild.voice_client
     if not voice_client or not voice_client.is_playing():
         return await interaction.response.send_message("Şu an çalan bir şey yok.", ephemeral=True)
@@ -572,14 +558,9 @@ async def muzikdurdur(interaction: discord.Interaction):
 @bot.tree.command(name="seslisoru", description="Sesli kanaldaki kişileri bilerek, MÜZİK çalarak ve HAFIZA ile yanıt verir.")
 async def seslisoru(interaction: discord.Interaction, soru: str):
     voice_client: discord.VoiceClient = interaction.guild.voice_client
-    if not voice_client:
-        if interaction.user.voice:
-            try:
-                voice_client = await interaction.user.voice.channel.connect()
-            except Exception:
-                return await interaction.response.send_message("Sesli kanala katılamadım.", ephemeral=True)
-        else:
-            return await interaction.response.send_message("Hey! Sesli Kanalda Değilim. Sesli Kanala Katılın.", ephemeral=True)
+    # Bot herhangi bir sesli kanalda değilse iptal et (Bot otomatik katılmayacak)
+    if not voice_client or not voice_client.is_connected():
+        return await interaction.response.send_message("Şu an herhangi bir sesli kanalda değilim. Lütfen önce `/quantumkatil` komutu ile beni bir sesli kanala çağırın.", ephemeral=True)
 
     await interaction.response.defer()
     try:
@@ -634,7 +615,7 @@ async def seslisoru(interaction: discord.Interaction, soru: str):
             if play_query:
                 asyncio.run_coroutine_threadsafe(play_music_in_voice(voice_client, play_query), bot.loop)
 
-        voice_client.play(discord.FFmpegPCMAudio(audio_file, executable=FFMPEG_EXE), after=after_tts)
+        voice_client.play(discord.FFmpegPCMAudio(audio_file), after=after_tts)
 
     except Exception as e: await interaction.followup.send(f"Bir hata oluştu: {str(e)}")
 
@@ -684,15 +665,12 @@ async def konustur_komutu(interaction: discord.Interaction, metin: str):
         await generate_tts(metin, audio_file)
         if voice_client.is_playing():
             voice_client.stop()
-        voice_client.play(discord.FFmpegPCMAudio(audio_file, executable=FFMPEG_EXE))
+        voice_client.play(discord.FFmpegPCMAudio(audio_file))
         await interaction.followup.send(f"Metin başarıyla okundu: **{metin}**", ephemeral=True)
     except Exception as e: await interaction.followup.send(f"Bir hata oluştu: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="quantumkatil", description="Sesli kanala katılır.")
 async def quantumkatil(interaction: discord.Interaction):
-    if interaction.user.name != "turkyoshi8092":
-        return await interaction.response.send_message("Hey! Bu Komut Siz Düzgün Kullanmadığınız İçin Çalıştıramazsınız Ve Sürekli Ya Spam Veya Güvenlik Açıklarından Dolayı Bir Süre Kapalı Olacak. Lütfen Başka Komutları Deneyiniz.", ephemeral=True)
-
     if not interaction.user.voice: return await interaction.response.send_message("Önce bir sesli kanala katılmalısın.", ephemeral=True)
 
     channel = interaction.user.voice.channel
@@ -700,18 +678,15 @@ async def quantumkatil(interaction: discord.Interaction):
     if not voice_client:
         voice_client = await channel.connect()
 
-    await interaction.response.send_message(f"{channel.name} kanalına katıldım. Selamın Aleyküm! Sesli Sohbete Katıldım, Size Nasıl Yardımcı Olabilirim?")
+    await interaction.response.send_message(f"{channel.name} kanalına katıldım.")
     
     audio_file = "katildi.mp3"
-    await generate_tts("Selamın Aleyküm! Sesli Sohbete Katıldım, Size Nasıl Yardımcı Olabilirim?", audio_file)
+    await generate_tts("Sohbete katıldım.", audio_file)
     if voice_client.is_playing(): voice_client.stop()
-    voice_client.play(discord.FFmpegPCMAudio(audio_file, executable=FFMPEG_EXE))
+    voice_client.play(discord.FFmpegPCMAudio(audio_file))
 
 @bot.tree.command(name="quantumayril", description="Sesli kanaldan ayrılır.")
 async def quantumayril(interaction: discord.Interaction):
-    if interaction.user.name != "turkyoshi8092":
-        return await interaction.response.send_message("Hey! Bu Komut Siz Düzgün Kullanmadığınız İçin Çalıştıramazsınız Ve Sürekli Ya Spam Veya Güvenlik Açıklarından Dolayı Bir Süre Kapalı Olacak. Lütfen Başka Komutları Deneyiniz.", ephemeral=True)
-
     voice_client: discord.VoiceClient = interaction.guild.voice_client
     if voice_client:
         await voice_client.disconnect()
