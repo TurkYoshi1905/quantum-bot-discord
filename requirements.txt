@@ -1,6 +1,6 @@
 discord.py[voice]>=2.4.0
 PyNaCl
-yt-dlp
+pytubefix
 groq
 openai
 edge-tts
